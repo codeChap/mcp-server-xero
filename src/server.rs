@@ -942,16 +942,22 @@ impl XeroServer {
     // Bank Transactions
     // -----------------------------------------------------------------------
 
-    #[tool(description = "List bank transactions. Supports filtering and ordering.")]
+    #[tool(description = "List bank transactions. Supports filtering and ordering. \
+                           Each line reports the account code(s) and tax type(s) it was coded to, \
+                           the VAT amount, and the transaction id; split transactions list every \
+                           distinct value. Filter on tax with a where_filter such as 'TotalTax>0'. \
+                           The id is what set_bank_transaction_tax_type takes.")]
     async fn list_bank_transactions(
         &self,
         Parameters(p): Parameters<ListBankTransactionsParams>,
     ) -> Result<CallToolResult, McpError> {
         debug!("list_bank_transactions");
 
+        // Always page. Xero omits LineItems from an unpaged collection response, which
+        // would blank out the account code and tax type on every row.
         let path = build_query(
             "/BankTransactions",
-            p.page,
+            Some(p.page.unwrap_or(1)),
             p.where_filter.as_deref(),
             p.order.as_deref(),
             &[],
@@ -969,22 +975,236 @@ impl XeroServer {
                 let lines: Vec<String> = resp
                     .bank_transactions
                     .iter()
-                    .map(|bt| {
-                        let date = bt.date.as_deref().unwrap_or("—");
-                        let bt_type = bt.transaction_type.as_deref().unwrap_or("—");
-                        let total = bt.total.map(|t| format!("{t:.2}")).unwrap_or("—".into());
-                        let contact = bt
-                            .contact
-                            .as_ref()
-                            .and_then(|c| c.name.as_deref())
-                            .unwrap_or("—");
-                        let status = bt.status.as_deref().unwrap_or("—");
-                        format!("{date} | {bt_type} | {total} | {contact} | {status}")
-                    })
+                    .map(format_bank_transaction)
                     .collect();
                 ok(format!(
                     "Found {} bank transactions:\n{}",
                     resp.bank_transactions.len(),
+                    lines.join("\n")
+                ))
+            }
+            Err(e) => err(e),
+        }
+    }
+
+    #[tool(description = "Set the tax type on every line of an existing bank transaction, \
+                           e.g. tax_type='NONE' to remove VAT from an entry that should not \
+                           carry it. Every other field is preserved. On a tax-inclusive \
+                           transaction the total does not change — only the split between the \
+                           expense account and the VAT account. Use dry_run=true to preview \
+                           the payload; writing requires confirm='YES-WRITE'. \
+                           NOTE: Xero rejects this with a ValidationException for any \
+                           transaction already reconciled against a bank statement — the API \
+                           grants no way around it (the docs do not mention this; it was found \
+                           by trying). Recoding reconciled entries in bulk is only possible in \
+                           the Xero UI via Accounting > Advanced > Find & Recode.")]
+    async fn set_bank_transaction_tax_type(
+        &self,
+        Parameters(p): Parameters<SetBankTransactionTaxTypeParams>,
+    ) -> Result<CallToolResult, McpError> {
+        debug!(id = %p.bank_transaction_id, tax_type = %p.tax_type, "set_bank_transaction_tax_type");
+
+        let dry_run = p.dry_run.unwrap_or(false);
+        if !dry_run && p.confirm.as_deref() != Some("YES-WRITE") {
+            return ok(
+                "Refused: this writes to live accounting records. Pass confirm='YES-WRITE' \
+                 to proceed, or dry_run=true to preview the change without sending it."
+                    .into(),
+            );
+        }
+
+        match self
+            .client
+            .set_bank_transaction_tax_type(&p.bank_transaction_id, &p.tax_type, dry_run)
+            .await
+        {
+            Ok(u) => ok(format_tax_type_update(&u, dry_run)),
+            Err(e) => err(e),
+        }
+    }
+
+    #[tool(
+        description = "Pull bank statement lines for a bank account over a date range \
+                       (Finance API Bank Statements Plus). Shows payee, amount, date, \
+                       isReconciled, and any already-matched bank transaction / payment \
+                       IDs. Default unreconciled_only=true so you see what is still open. \
+                       bank_account_id is the AccountID UUID (list_accounts where \
+                       Type==\"BANK\"). Max range 12 months. \
+                       PARTNER SCOPE: finance.bankstatementsplus.read is restricted to \
+                       Xero Financial Services partners. A normal app gets 401 \
+                       AuthorizationUnsuccessful (requesting the scope on authorize can \
+                       500). Without partnership, use list_bank_transactions with \
+                       where_filter IsReconciled==false for the books-side queue. \
+                       HARD LIMIT: even with Finance access, Xero does not allow ticking \
+                       off feed lines via API — only reading them."
+    )]
+    async fn list_bank_statement_lines(
+        &self,
+        Parameters(p): Parameters<ListBankStatementLinesParams>,
+    ) -> Result<CallToolResult, McpError> {
+        debug!(
+            bank = %p.bank_account_id,
+            from = %p.from_date,
+            to = %p.to_date,
+            "list_bank_statement_lines"
+        );
+
+        let unreconciled_only = p.unreconciled_only.unwrap_or(true);
+        let summary_only = p.summary_only.unwrap_or(true);
+        let summary_str = if summary_only { "true" } else { "false" };
+
+        let path = format!(
+            "/BankStatementsPlus/statements?BankAccountID={}&FromDate={}&ToDate={}&SummaryOnly={}",
+            urlencoding::encode(&p.bank_account_id),
+            urlencoding::encode(&p.from_date),
+            urlencoding::encode(&p.to_date),
+            summary_str,
+        );
+
+        match self
+            .client
+            .finance_request::<(), BankStatementAccountingResponse>(Method::GET, &path, None)
+            .await
+        {
+            Ok(resp) => ok(format_bank_statements_plus(&resp, unreconciled_only)),
+            Err(e) => err(e),
+        }
+    }
+
+    #[tool(
+        description = "Bank reconciliation summary per bank account (Finance API Cash \
+                       Validation): unreconciled line counts/amounts, earliest/latest \
+                       unreconciled dates, statement balance. PARTNER SCOPE: \
+                       finance.cashvalidation.read needs Xero Financial Services \
+                       partnership (normal apps get 401). Read-only; cannot tick off lines."
+    )]
+    async fn get_cash_validation(
+        &self,
+        Parameters(p): Parameters<GetCashValidationParams>,
+    ) -> Result<CallToolResult, McpError> {
+        debug!("get_cash_validation");
+
+        let path = if let Some(ref d) = p.balance_date {
+            format!(
+                "/CashValidation?balanceDate={}",
+                urlencoding::encode(d)
+            )
+        } else {
+            "/CashValidation".to_string()
+        };
+
+        match self
+            .client
+            .finance_request::<(), Vec<CashValidationItem>>(Method::GET, &path, None)
+            .await
+        {
+            Ok(items) => ok(format_cash_validation(&items)),
+            Err(e) => err(e),
+        }
+    }
+
+    #[tool(
+        description = "Create a spend or receive money bank transaction (Accounting API). \
+                       Use for coding money that left/entered the bank without an invoice, \
+                       or when importing history. line_items is a JSON array. \
+                       Writing requires confirm='YES-WRITE'; dry_run=true previews. \
+                       is_reconciled=true posts already reconciled (Xero invents a \
+                       statement line) — ONLY when there is no bank-feed line for this \
+                       amount. Matching an existing feed line to 'tick it off' is not \
+                       possible via API; leave is_reconciled false and match in the UI. \
+                       For invoice payments use create_payment instead."
+    )]
+    async fn create_bank_transaction(
+        &self,
+        Parameters(p): Parameters<CreateBankTransactionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        debug!(
+            r#type = %p.transaction_type,
+            bank = %p.bank_account_code,
+            "create_bank_transaction"
+        );
+
+        let dry_run = p.dry_run.unwrap_or(false);
+        if !dry_run && p.confirm.as_deref() != Some("YES-WRITE") {
+            return ok(
+                "Refused: this writes to live accounting records. Pass confirm='YES-WRITE' \
+                 to proceed, or dry_run=true to preview the payload without sending it."
+                    .into(),
+            );
+        }
+
+        let line_items: Value = match serde_json::from_str(&p.line_items) {
+            Ok(v) => v,
+            Err(e) => {
+                return ok(format!(
+                    "Invalid line_items JSON: {e}. Expected array like \
+                     [{{\"Description\":\"xAI\",\"Quantity\":1,\"UnitAmount\":100,\"AccountCode\":\"485\",\"TaxType\":\"NONE\"}}]"
+                ));
+            }
+        };
+        if !line_items.is_array() {
+            return ok("line_items must be a JSON array of line objects.".into());
+        }
+
+        let txn_type = p.transaction_type.to_uppercase();
+        let allowed = [
+            "SPEND",
+            "RECEIVE",
+            "SPEND-PREPAYMENT",
+            "RECEIVE-PREPAYMENT",
+            "SPEND-OVERPAYMENT",
+            "RECEIVE-OVERPAYMENT",
+        ];
+        if !allowed.iter().any(|t| *t == txn_type) {
+            return ok(format!(
+                "Invalid transaction_type '{txn_type}'. Allowed: {}",
+                allowed.join(", ")
+            ));
+        }
+
+        let mut txn = json!({
+            "Type": txn_type,
+            "Contact": { "ContactID": p.contact_id },
+            "BankAccount": { "Code": p.bank_account_code },
+            "LineItems": line_items,
+            "LineAmountTypes": p.line_amount_types.as_deref().unwrap_or("Inclusive"),
+        });
+        if let Some(ref date) = p.date {
+            txn["Date"] = json!(date);
+        }
+        if let Some(ref reference) = p.reference {
+            txn["Reference"] = json!(reference);
+        }
+        if p.is_reconciled == Some(true) {
+            txn["IsReconciled"] = json!(true);
+        }
+
+        // Xero expects an envelope: { "BankTransactions": [ ... ] }
+        let payload = json!({ "BankTransactions": [txn] });
+
+        if dry_run {
+            return ok(format!(
+                "DRY RUN — nothing was sent to Xero.\nPayload that would be PUT:\n{}",
+                serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "—".into())
+            ));
+        }
+
+        match self
+            .client
+            .request::<_, BankTransactionsResponse>(Method::PUT, "/BankTransactions", Some(&payload))
+            .await
+        {
+            Ok(resp) => {
+                if resp.bank_transactions.is_empty() {
+                    return ok("Created, but Xero returned no bank transactions.".into());
+                }
+                let lines: Vec<String> = resp
+                    .bank_transactions
+                    .iter()
+                    .map(format_bank_transaction)
+                    .collect();
+                ok(format!(
+                    "Bank transaction created:\n{}",
                     lines.join("\n")
                 ))
             }
@@ -1130,8 +1350,14 @@ impl ServerHandler for XeroServer {
                  list/get/create/update contacts, list accounts, list/create items, \
                  list/create payments, list credit notes, list quotes, list tax rates, \
                  get organisation, list tracking categories, list bank transactions, \
-                 and financial reports (P&L, balance sheet, trial balance, \
-                 aged receivables, aged payables).",
+                 set bank transaction tax type, create bank transaction (spend/receive), \
+                 list bank statement lines (Finance API Bank Statements Plus), \
+                 get cash validation (recon summary), and financial reports \
+                 (P&L, balance sheet, trial balance, aged receivables, aged payables). \
+                 IMPORTANT: Xero does not expose reconciling/ticking bank-feed statement \
+                 lines via the public API. list_bank_statement_lines is read-only; \
+                 create_bank_transaction/create_payment post books entries; final match \
+                 of feed lines is done in the Xero Reconcile UI.",
             )
     }
 }

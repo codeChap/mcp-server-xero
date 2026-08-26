@@ -344,6 +344,118 @@ pub struct ListBankTransactionsParams {
     pub order: Option<String>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SetBankTransactionTaxTypeParams {
+    #[schemars(description = "Bank transaction ID (UUID) to update")]
+    pub bank_transaction_id: String,
+
+    #[schemars(
+        description = "Tax type code to set on every line, e.g. 'NONE' for No VAT. \
+                       See list_tax_rates for valid codes."
+    )]
+    pub tax_type: String,
+
+    #[schemars(
+        description = "Preview only: build and validate the payload, report what would \
+                       change, but send nothing. Defaults to false."
+    )]
+    pub dry_run: Option<bool>,
+
+    #[schemars(
+        description = "Must be exactly 'YES-WRITE' to actually write. Ignored when \
+                       dry_run is true."
+    )]
+    pub confirm: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ListBankStatementLinesParams {
+    #[schemars(
+        description = "Bank account AccountID (UUID). Use list_accounts with \
+                       where_filter Type==\"BANK\" to find it."
+    )]
+    pub bank_account_id: String,
+
+    #[schemars(description = "Start date YYYY-MM-DD (inclusive). Range max 12 months.")]
+    pub from_date: String,
+
+    #[schemars(description = "End date YYYY-MM-DD (inclusive). Must not be in the future.")]
+    pub to_date: String,
+
+    #[schemars(
+        description = "If true (default), only return unreconciled statement lines. \
+                       Set false to include already-reconciled lines too."
+    )]
+    pub unreconciled_only: Option<bool>,
+
+    #[schemars(
+        description = "If true (default), omit heavy LineItems on matched bank \
+                       transactions for speed. Set false for full matched detail."
+    )]
+    pub summary_only: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct GetCashValidationParams {
+    #[schemars(
+        description = "Optional balance date YYYY-MM-DD. Defaults to today per Xero."
+    )]
+    pub balance_date: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CreateBankTransactionParams {
+    #[schemars(
+        description = "Transaction type: SPEND (money out) or RECEIVE (money in). \
+                       Also SPEND-PREPAYMENT, RECEIVE-PREPAYMENT, SPEND-OVERPAYMENT, \
+                       RECEIVE-OVERPAYMENT."
+    )]
+    pub transaction_type: String,
+
+    #[schemars(description = "Bank account code (e.g. '090'), not the AccountID.")]
+    pub bank_account_code: String,
+
+    #[schemars(description = "Contact ID (UUID) for who was paid / who paid.")]
+    pub contact_id: String,
+
+    #[schemars(
+        description = "Line items as JSON array. Each item: {\"Description\": \"...\", \
+                       \"Quantity\": 1, \"UnitAmount\": 100.00, \"AccountCode\": \"400\", \
+                       \"TaxType\": \"NONE\"}. TaxType defaults to org default if omitted."
+    )]
+    pub line_items: String,
+
+    #[schemars(description = "Transaction date YYYY-MM-DD (defaults to today in Xero).")]
+    pub date: Option<String>,
+
+    #[schemars(description = "Optional bank reference / narrative.")]
+    pub reference: Option<String>,
+
+    #[schemars(
+        description = "Line amount types: Inclusive, Exclusive, or NoTax. Defaults to Inclusive."
+    )]
+    pub line_amount_types: Option<String>,
+
+    #[schemars(
+        description = "If true, post already reconciled. Xero invents a matching statement \
+                       line — only correct when there is NO bank-feed line to match \
+                       (conversion / CSV import style). Never use this to 'tick off' an \
+                       existing feed line; that is not supported by the API and can \
+                       double-count. Defaults to false."
+    )]
+    pub is_reconciled: Option<bool>,
+
+    #[schemars(
+        description = "Preview only: validate and show payload, send nothing. Defaults to false."
+    )]
+    pub dry_run: Option<bool>,
+
+    #[schemars(
+        description = "Must be exactly 'YES-WRITE' to actually create. Ignored when dry_run is true."
+    )]
+    pub confirm: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Tracking Categories
 // ---------------------------------------------------------------------------

@@ -1,7 +1,8 @@
-use anyhow::{Context, Result, bail};
-use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
+use anyhow::{bail, Context, Result};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -14,6 +15,12 @@ const AUTH_URL: &str = "https://login.xero.com/identity/connect/authorize";
 const TOKEN_URL: &str = "https://identity.xero.com/connect/token";
 const CONNECTIONS_URL: &str = "https://api.xero.com/connections";
 
+/// Default OAuth scopes for a standard (non-partner) Xero app.
+///
+/// `finance.bankstatementsplus.read` and `finance.cashvalidation.read` are
+/// intentionally omitted: they belong to the Finance API, which Xero restricts
+/// to Financial Services partners. Requesting them on a normal app causes the
+/// authorize endpoint to 500. Add them only when the app is approved for Finance.
 const DEFAULT_SCOPES: &str = "openid profile email offline_access \
     accounting.invoices accounting.payments accounting.banktransactions accounting.manualjournals \
     accounting.contacts accounting.settings \
@@ -28,6 +35,10 @@ pub struct StoredTokens {
     pub refresh_token: String,
     pub expires_at: u64,
     pub tenant_id: String,
+    /// Granted scopes. Accept `scope` (the raw Xero token-response key) as an
+    /// alias and default to empty so a token file written in the raw response
+    /// shape still deserializes instead of silently disabling the auth-code flow.
+    #[serde(alias = "scope", default)]
     pub scopes: String,
 }
 
@@ -37,6 +48,25 @@ pub fn tokens_path() -> PathBuf {
         .join(".config")
         .join("mcp-server-xero")
         .join("tokens.json")
+}
+
+/// Sibling of [`tokens_path`] — the store inode is replaced on save, so flock
+/// the lockfile, not `tokens.json`. Shared with mailman-xero.
+fn token_lock() -> Result<File> {
+    let path = tokens_path().with_file_name("tokens.json.lock");
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&path)
+        .with_context(|| format!("opening {}", path.display()))?;
+    file.lock()
+        .with_context(|| format!("locking {}", path.display()))?;
+    Ok(file)
 }
 
 pub fn load_tokens() -> Option<StoredTokens> {
@@ -71,7 +101,8 @@ pub async fn authorize(client_id: &str, client_secret: &str, scopes: Option<&str
     let scopes = scopes.unwrap_or(DEFAULT_SCOPES);
     let state = {
         let mut buf = [0u8; 16];
-        getrandom::getrandom(&mut buf).map_err(|e| anyhow::anyhow!("Failed to generate random state: {e}"))?;
+        getrandom::getrandom(&mut buf)
+            .map_err(|e| anyhow::anyhow!("Failed to generate random state: {e}"))?;
         buf.iter().map(|b| format!("{b:02x}")).collect::<String>()
     };
 
@@ -83,7 +114,8 @@ pub async fn authorize(client_id: &str, client_secret: &str, scopes: Option<&str
     );
 
     // Start local server before opening browser.
-    let listener = TcpListener::bind("127.0.0.1:8765").await
+    let listener = TcpListener::bind("127.0.0.1:8765")
+        .await
         .context("Failed to bind to port 8765 — is another instance running?")?;
 
     println!("Opening browser for Xero authorization...\n");
@@ -113,7 +145,10 @@ pub async fn authorize(client_id: &str, client_secret: &str, scopes: Option<&str
     let (status, body) = if code.is_some() {
         ("200 OK", "<html><body><h2>Authorization successful!</h2><p>You can close this tab.</p></body></html>")
     } else {
-        ("400 Bad Request", "<html><body><h2>Authorization failed</h2><p>No code received.</p></body></html>")
+        (
+            "400 Bad Request",
+            "<html><body><h2>Authorization failed</h2><p>No code received.</p></body></html>",
+        )
     };
 
     let response = format!(
@@ -162,7 +197,10 @@ pub async fn authorize(client_id: &str, client_secret: &str, scopes: Option<&str
 
     let connections: Vec<ConnectionInfo> = http
         .get(CONNECTIONS_URL)
-        .header("Authorization", format!("Bearer {}", token_resp.access_token))
+        .header(
+            "Authorization",
+            format!("Bearer {}", token_resp.access_token),
+        )
         .send()
         .await?
         .json()
@@ -180,10 +218,14 @@ pub async fn authorize(client_id: &str, client_secret: &str, scopes: Option<&str
         scopes: scopes.to_string(),
     };
 
+    let _lock = token_lock()?;
     save_tokens(&tokens)?;
 
     println!("\nAuthorization complete!");
-    println!("  Organisation: {}", tenant.tenant_name.as_deref().unwrap_or("unknown"));
+    println!(
+        "  Organisation: {}",
+        tenant.tenant_name.as_deref().unwrap_or("unknown")
+    );
     println!("  Tenant ID:    {}", tenant.tenant_id);
     println!("  Tokens saved to: {}", tokens_path().display());
     println!("\nYou can now run the MCP server normally.");
@@ -198,6 +240,14 @@ pub async fn refresh_tokens(
     client_secret: &str,
     stored: &StoredTokens,
 ) -> Result<StoredTokens> {
+    // Re-read under the flock so a concurrent mailman refresh that already
+    // rotated the token is picked up instead of spending the stale one.
+    let _lock = token_lock()?;
+    let stored = load_tokens().unwrap_or_else(|| stored.clone());
+    if now_secs() < stored.expires_at.saturating_sub(60) {
+        return Ok(stored);
+    }
+
     let credentials = BASE64.encode(format!("{client_id}:{client_secret}"));
 
     let resp = http
@@ -221,7 +271,9 @@ pub async fn refresh_tokens(
 
     let updated = StoredTokens {
         access_token: token_resp.access_token,
-        refresh_token: token_resp.refresh_token.unwrap_or_else(|| stored.refresh_token.clone()),
+        refresh_token: token_resp
+            .refresh_token
+            .unwrap_or_else(|| stored.refresh_token.clone()),
         expires_at: now_secs() + token_resp.expires_in,
         tenant_id: stored.tenant_id.clone(),
         scopes: stored.scopes.clone(),

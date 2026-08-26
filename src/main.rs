@@ -41,6 +41,15 @@ async fn main() -> Result<()> {
     let mode = if let Some(tokens) = auth::load_tokens() {
         info!("using stored tokens (authorization code flow)");
         AuthMode::AuthorizationCode { tokens }
+    } else if auth::tokens_path().exists() {
+        // A token file is present but could not be parsed. Silently dropping to
+        // client_credentials fails confusingly (Web App apps reject that grant),
+        // so surface the real problem instead of masking it.
+        anyhow::bail!(
+            "Token file {} exists but could not be parsed. \
+             Re-run `mcp-server-xero --auth` to re-authorize.",
+            auth::tokens_path().display()
+        );
     } else {
         info!("using client_credentials flow (Custom Connection)");
         AuthMode::ClientCredentials {
