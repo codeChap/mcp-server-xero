@@ -1,10 +1,7 @@
 use reqwest::Method;
 use rmcp::{
-    ErrorData as McpError, ServerHandler,
-    handler::server::tool::ToolRouter,
-    handler::server::wrapper::Parameters,
-    model::*,
-    tool, tool_handler, tool_router,
+    handler::server::tool::ToolRouter, handler::server::wrapper::Parameters, model::*, tool,
+    tool_handler, tool_router, ErrorData as McpError, ServerHandler,
 };
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -91,18 +88,11 @@ fn report_to_text(val: &Value) -> String {
                                     .filter_map(|c| c.get("Value").and_then(|v| v.as_str()))
                                     .collect();
                                 if !values.is_empty() {
-                                    let sub_type = sub
-                                        .get("RowType")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("");
-                                    let prefix =
-                                        if sub_type == "SummaryRow" { "**" } else { "  " };
-                                    let suffix =
-                                        if sub_type == "SummaryRow" { "**" } else { "" };
-                                    lines.push(format!(
-                                        "{prefix}{}{suffix}",
-                                        values.join(" | ")
-                                    ));
+                                    let sub_type =
+                                        sub.get("RowType").and_then(|v| v.as_str()).unwrap_or("");
+                                    let prefix = if sub_type == "SummaryRow" { "**" } else { "  " };
+                                    let suffix = if sub_type == "SummaryRow" { "**" } else { "" };
+                                    lines.push(format!("{prefix}{}{suffix}", values.join(" | ")));
                                 }
                             }
                         }
@@ -179,8 +169,10 @@ impl XeroServer {
     // Invoices
     // -----------------------------------------------------------------------
 
-    #[tool(description = "List invoices from Xero. Supports filtering by status, contact, search term, \
-                           and custom OData where clauses. Returns paginated results (100 per page).")]
+    #[tool(
+        description = "List invoices from Xero. Supports filtering by status, contact, search term, \
+                           and custom OData where clauses. Returns paginated results (100 per page)."
+    )]
     async fn list_invoices(
         &self,
         Parameters(p): Parameters<ListInvoicesParams>,
@@ -222,7 +214,11 @@ impl XeroServer {
             &extra,
         );
 
-        match self.client.request::<(), InvoicesResponse>(Method::GET, &path, None).await {
+        match self
+            .client
+            .request::<(), InvoicesResponse>(Method::GET, &path, None)
+            .await
+        {
             Ok(resp) => {
                 if resp.invoices.is_empty() {
                     return ok("No invoices found.".into());
@@ -238,7 +234,9 @@ impl XeroServer {
         }
     }
 
-    #[tool(description = "Get a single invoice by ID or invoice number, including full line item details.")]
+    #[tool(
+        description = "Get a single invoice by ID or invoice number, including full line item details."
+    )]
     async fn get_invoice(
         &self,
         Parameters(p): Parameters<GetInvoiceParams>,
@@ -246,7 +244,11 @@ impl XeroServer {
         debug!(id = %p.invoice_id, "get_invoice");
 
         let path = format!("/Invoices/{}", p.invoice_id);
-        match self.client.request::<(), InvoicesResponse>(Method::GET, &path, None).await {
+        match self
+            .client
+            .request::<(), InvoicesResponse>(Method::GET, &path, None)
+            .await
+        {
             Ok(resp) => {
                 let text = serde_json::to_string_pretty(&resp.invoices)
                     .unwrap_or_else(|_| format!("{resp:?}"));
@@ -256,9 +258,11 @@ impl XeroServer {
         }
     }
 
-    #[tool(description = "Create a new invoice in Xero (created as DRAFT by default). \
+    #[tool(
+        description = "Create a new invoice in Xero (created as DRAFT by default). \
                            Requires invoice type (ACCREC for sales, ACCPAY for bills), \
-                           a contact ID, and line items.")]
+                           a contact ID, and line items."
+    )]
     async fn create_invoice(
         &self,
         Parameters(p): Parameters<CreateInvoiceParams>,
@@ -272,9 +276,8 @@ impl XeroServer {
             ));
         }
 
-        let line_items: Vec<Value> = serde_json::from_str(&p.line_items).map_err(|e| {
-            McpError::invalid_params(format!("Invalid line_items JSON: {e}"), None)
-        })?;
+        let line_items: Vec<Value> = serde_json::from_str(&p.line_items)
+            .map_err(|e| McpError::invalid_params(format!("Invalid line_items JSON: {e}"), None))?;
 
         let mut invoice = json!({
             "Type": p.invoice_type,
@@ -312,7 +315,9 @@ impl XeroServer {
         }
     }
 
-    #[tool(description = "Update an existing invoice. Can change status, due date, reference, or replace line items.")]
+    #[tool(
+        description = "Update an existing invoice. Can change status, due date, reference, or replace line items."
+    )]
     async fn update_invoice(
         &self,
         Parameters(p): Parameters<UpdateInvoiceParams>,
@@ -356,7 +361,9 @@ impl XeroServer {
     // Contacts
     // -----------------------------------------------------------------------
 
-    #[tool(description = "List contacts from Xero. Supports search and custom filters. Returns paginated results (100 per page).")]
+    #[tool(
+        description = "List contacts from Xero. Supports search and custom filters. Returns paginated results (100 per page)."
+    )]
     async fn list_contacts(
         &self,
         Parameters(p): Parameters<ListContactsParams>,
@@ -376,7 +383,11 @@ impl XeroServer {
             &extra,
         );
 
-        match self.client.request::<(), ContactsResponse>(Method::GET, &path, None).await {
+        match self
+            .client
+            .request::<(), ContactsResponse>(Method::GET, &path, None)
+            .await
+        {
             Ok(resp) => {
                 if resp.contacts.is_empty() {
                     return ok("No contacts found.".into());
@@ -400,7 +411,11 @@ impl XeroServer {
         debug!(id = %p.contact_id, "get_contact");
 
         let path = format!("/Contacts/{}", p.contact_id);
-        match self.client.request::<(), ContactsResponse>(Method::GET, &path, None).await {
+        match self
+            .client
+            .request::<(), ContactsResponse>(Method::GET, &path, None)
+            .await
+        {
             Ok(resp) => {
                 let text = serde_json::to_string_pretty(&resp.contacts)
                     .unwrap_or_else(|_| format!("{resp:?}"));
@@ -450,12 +465,24 @@ impl XeroServer {
             || p.country.is_some()
         {
             let mut addr = json!({ "AddressType": "STREET" });
-            if let Some(ref v) = p.address_line1 { addr["AddressLine1"] = json!(v); }
-            if let Some(ref v) = p.address_line2 { addr["AddressLine2"] = json!(v); }
-            if let Some(ref v) = p.city { addr["City"] = json!(v); }
-            if let Some(ref v) = p.region { addr["Region"] = json!(v); }
-            if let Some(ref v) = p.postal_code { addr["PostalCode"] = json!(v); }
-            if let Some(ref v) = p.country { addr["Country"] = json!(v); }
+            if let Some(ref v) = p.address_line1 {
+                addr["AddressLine1"] = json!(v);
+            }
+            if let Some(ref v) = p.address_line2 {
+                addr["AddressLine2"] = json!(v);
+            }
+            if let Some(ref v) = p.city {
+                addr["City"] = json!(v);
+            }
+            if let Some(ref v) = p.region {
+                addr["Region"] = json!(v);
+            }
+            if let Some(ref v) = p.postal_code {
+                addr["PostalCode"] = json!(v);
+            }
+            if let Some(ref v) = p.country {
+                addr["Country"] = json!(v);
+            }
             contact["Addresses"] = json!([addr]);
         }
 
@@ -516,12 +543,24 @@ impl XeroServer {
             || p.country.is_some()
         {
             let mut addr = json!({ "AddressType": "STREET" });
-            if let Some(ref v) = p.address_line1 { addr["AddressLine1"] = json!(v); }
-            if let Some(ref v) = p.address_line2 { addr["AddressLine2"] = json!(v); }
-            if let Some(ref v) = p.city { addr["City"] = json!(v); }
-            if let Some(ref v) = p.region { addr["Region"] = json!(v); }
-            if let Some(ref v) = p.postal_code { addr["PostalCode"] = json!(v); }
-            if let Some(ref v) = p.country { addr["Country"] = json!(v); }
+            if let Some(ref v) = p.address_line1 {
+                addr["AddressLine1"] = json!(v);
+            }
+            if let Some(ref v) = p.address_line2 {
+                addr["AddressLine2"] = json!(v);
+            }
+            if let Some(ref v) = p.city {
+                addr["City"] = json!(v);
+            }
+            if let Some(ref v) = p.region {
+                addr["Region"] = json!(v);
+            }
+            if let Some(ref v) = p.postal_code {
+                addr["PostalCode"] = json!(v);
+            }
+            if let Some(ref v) = p.country {
+                addr["Country"] = json!(v);
+            }
             contact["Addresses"] = json!([addr]);
         }
 
@@ -544,7 +583,9 @@ impl XeroServer {
     // Accounts (Chart of Accounts)
     // -----------------------------------------------------------------------
 
-    #[tool(description = "List the chart of accounts. Filter by type (REVENUE, EXPENSE, ASSET, etc.) or status using where_filter.")]
+    #[tool(
+        description = "List the chart of accounts. Filter by type (REVENUE, EXPENSE, ASSET, etc.) or status using where_filter."
+    )]
     async fn list_accounts(
         &self,
         Parameters(p): Parameters<ListAccountsParams>,
@@ -553,7 +594,11 @@ impl XeroServer {
 
         let path = build_query("/Accounts", None, p.where_filter.as_deref(), None, &[]);
 
-        match self.client.request::<(), AccountsResponse>(Method::GET, &path, None).await {
+        match self
+            .client
+            .request::<(), AccountsResponse>(Method::GET, &path, None)
+            .await
+        {
             Ok(resp) => {
                 if resp.accounts.is_empty() {
                     return ok("No accounts found.".into());
@@ -582,7 +627,11 @@ impl XeroServer {
 
         let path = build_query("/Items", None, p.where_filter.as_deref(), None, &[]);
 
-        match self.client.request::<(), ItemsResponse>(Method::GET, &path, None).await {
+        match self
+            .client
+            .request::<(), ItemsResponse>(Method::GET, &path, None)
+            .await
+        {
             Ok(resp) => {
                 if resp.items.is_empty() {
                     return ok("No items found.".into());
@@ -597,7 +646,11 @@ impl XeroServer {
                         format!("{code} | {name} | {desc}")
                     })
                     .collect();
-                ok(format!("Found {} items:\n{}", resp.items.len(), lines.join("\n")))
+                ok(format!(
+                    "Found {} items:\n{}",
+                    resp.items.len(),
+                    lines.join("\n")
+                ))
             }
             Err(e) => err(e),
         }
@@ -655,7 +708,11 @@ impl XeroServer {
             &[],
         );
 
-        match self.client.request::<(), PaymentsResponse>(Method::GET, &path, None).await {
+        match self
+            .client
+            .request::<(), PaymentsResponse>(Method::GET, &path, None)
+            .await
+        {
             Ok(resp) => {
                 if resp.payments.is_empty() {
                     return ok("No payments found.".into());
@@ -791,7 +848,11 @@ impl XeroServer {
             &[],
         );
 
-        match self.client.request::<(), QuotesResponse>(Method::GET, &path, None).await {
+        match self
+            .client
+            .request::<(), QuotesResponse>(Method::GET, &path, None)
+            .await
+        {
             Ok(resp) => {
                 if resp.quotes.is_empty() {
                     return ok("No quotes found.".into());
@@ -866,7 +927,9 @@ impl XeroServer {
     // Organisation
     // -----------------------------------------------------------------------
 
-    #[tool(description = "Get details about the connected Xero organisation (name, currency, country, etc.).")]
+    #[tool(
+        description = "Get details about the connected Xero organisation (name, currency, country, etc.)."
+    )]
     async fn get_organisation(&self) -> Result<CallToolResult, McpError> {
         debug!("get_organisation");
 
@@ -942,11 +1005,13 @@ impl XeroServer {
     // Bank Transactions
     // -----------------------------------------------------------------------
 
-    #[tool(description = "List bank transactions. Supports filtering and ordering. \
+    #[tool(
+        description = "List bank transactions. Supports filtering and ordering. \
                            Each line reports the account code(s) and tax type(s) it was coded to, \
                            the VAT amount, and the transaction id; split transactions list every \
                            distinct value. Filter on tax with a where_filter such as 'TotalTax>0'. \
-                           The id is what set_bank_transaction_tax_type takes.")]
+                           The id is what set_bank_transaction_tax_type takes."
+    )]
     async fn list_bank_transactions(
         &self,
         Parameters(p): Parameters<ListBankTransactionsParams>,
@@ -987,7 +1052,8 @@ impl XeroServer {
         }
     }
 
-    #[tool(description = "Set the tax type on every line of an existing bank transaction, \
+    #[tool(
+        description = "Set the tax type on every line of an existing bank transaction, \
                            e.g. tax_type='NONE' to remove VAT from an entry that should not \
                            carry it. Every other field is preserved. On a tax-inclusive \
                            transaction the total does not change — only the split between the \
@@ -997,7 +1063,8 @@ impl XeroServer {
                            transaction already reconciled against a bank statement — the API \
                            grants no way around it (the docs do not mention this; it was found \
                            by trying). Recoding reconciled entries in bulk is only possible in \
-                           the Xero UI via Accounting > Advanced > Find & Recode.")]
+                           the Xero UI via Accounting > Advanced > Find & Recode."
+    )]
     async fn set_bank_transaction_tax_type(
         &self,
         Parameters(p): Parameters<SetBankTransactionTaxTypeParams>,
@@ -1085,10 +1152,7 @@ impl XeroServer {
         debug!("get_cash_validation");
 
         let path = if let Some(ref d) = p.balance_date {
-            format!(
-                "/CashValidation?balanceDate={}",
-                urlencoding::encode(d)
-            )
+            format!("/CashValidation?balanceDate={}", urlencoding::encode(d))
         } else {
             "/CashValidation".to_string()
         };
@@ -1191,7 +1255,11 @@ impl XeroServer {
 
         match self
             .client
-            .request::<_, BankTransactionsResponse>(Method::PUT, "/BankTransactions", Some(&payload))
+            .request::<_, BankTransactionsResponse>(
+                Method::PUT,
+                "/BankTransactions",
+                Some(&payload),
+            )
             .await
         {
             Ok(resp) => {
@@ -1203,10 +1271,7 @@ impl XeroServer {
                     .iter()
                     .map(format_bank_transaction)
                     .collect();
-                ok(format!(
-                    "Bank transaction created:\n{}",
-                    lines.join("\n")
-                ))
+                ok(format!("Bank transaction created:\n{}", lines.join("\n")))
             }
             Err(e) => err(e),
         }
@@ -1216,8 +1281,10 @@ impl XeroServer {
     // Email
     // -----------------------------------------------------------------------
 
-    #[tool(description = "Email an AUTHORISED invoice to the contact's email address. \
-                           The invoice must be in AUTHORISED status before it can be emailed.")]
+    #[tool(
+        description = "Email an AUTHORISED invoice to the contact's email address. \
+                           The invoice must be in AUTHORISED status before it can be emailed."
+    )]
     async fn email_invoice(
         &self,
         Parameters(p): Parameters<EmailInvoiceParams>,
@@ -1321,13 +1388,7 @@ impl XeroServer {
             extra.push(("date", date_str.as_str()));
         }
 
-        let path = build_query(
-            "/Reports/AgedPayablesByContact",
-            None,
-            None,
-            None,
-            &extra,
-        );
+        let path = build_query("/Reports/AgedPayablesByContact", None, None, None, &extra);
 
         match self.client.get_json(&path).await {
             Ok(val) => ok(report_to_text(&val)),

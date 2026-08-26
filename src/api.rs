@@ -1,7 +1,7 @@
-use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use reqwest::{Client, Method};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
@@ -143,7 +143,8 @@ impl XeroClient {
         let mode = self.mode.read().await;
         match &*mode {
             AuthMode::ClientCredentials { scopes } => {
-                self.auth_client_credentials(&mut guard, scopes.as_deref()).await
+                self.auth_client_credentials(&mut guard, scopes.as_deref())
+                    .await
             }
             AuthMode::AuthorizationCode { tokens } => {
                 let tokens = tokens.clone();
@@ -182,18 +183,27 @@ impl XeroClient {
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            return Err(ApiError::Auth(format!("Token request failed ({status}): {body}")));
+            return Err(ApiError::Auth(format!(
+                "Token request failed ({status}): {body}"
+            )));
         }
 
         let token_resp: ClientCredentialsResponse = resp.json().await?;
-        let expires_at =
-            Instant::now() + Duration::from_secs(token_resp.expires_in.saturating_sub(TOKEN_EXPIRY_BUFFER_SECS));
+        let expires_at = Instant::now()
+            + Duration::from_secs(
+                token_resp
+                    .expires_in
+                    .saturating_sub(TOKEN_EXPIRY_BUFFER_SECS),
+            );
 
         // Try to discover tenant ID.
         let tenant_id = match self
             .http
             .get(CONNECTIONS_URL)
-            .header("Authorization", format!("Bearer {}", token_resp.access_token))
+            .header(
+                "Authorization",
+                format!("Bearer {}", token_resp.access_token),
+            )
             .send()
             .await
         {
@@ -236,14 +246,10 @@ impl XeroClient {
 
         debug!("refreshing OAuth2 token");
 
-        let updated = auth::refresh_tokens(
-            &self.http,
-            &self.client_id,
-            &self.client_secret,
-            stored,
-        )
-        .await
-        .map_err(|e| ApiError::Auth(e.to_string()))?;
+        let updated =
+            auth::refresh_tokens(&self.http, &self.client_id, &self.client_secret, stored)
+                .await
+                .map_err(|e| ApiError::Auth(e.to_string()))?;
 
         let expires_in = updated.expires_at.saturating_sub(now_secs());
         let expires_at = Instant::now() + Duration::from_secs(expires_in);
@@ -258,7 +264,9 @@ impl XeroClient {
 
         // Update the stored tokens so subsequent refreshes use the latest refresh_token.
         let mut mode = self.mode.write().await;
-        *mode = AuthMode::AuthorizationCode { tokens: updated.clone() };
+        *mode = AuthMode::AuthorizationCode {
+            tokens: updated.clone(),
+        };
 
         Ok((updated.access_token, Some(updated.tenant_id)))
     }
@@ -328,9 +336,7 @@ impl XeroClient {
                 let _ = response.text().await;
                 warn!(
                     attempt,
-                    backoff_ms,
-                    path,
-                    "Xero rate limited (429), retrying"
+                    backoff_ms, path, "Xero rate limited (429), retrying"
                 );
                 tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
                 continue;
@@ -378,9 +384,7 @@ impl XeroClient {
                 let _ = response.text().await;
                 warn!(
                     attempt,
-                    backoff_ms,
-                    path,
-                    "Xero rate limited (429), retrying"
+                    backoff_ms, path, "Xero rate limited (429), retrying"
                 );
                 tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
                 continue;
@@ -1058,7 +1062,10 @@ pub fn format_bank_transaction(bt: &BankTransaction) -> String {
         .and_then(|c| c.name.as_deref())
         .unwrap_or("—");
     let status = bt.status.as_deref().unwrap_or("—");
-    let tax = bt.total_tax.map(|t| format!("{t:.2}")).unwrap_or("—".into());
+    let tax = bt
+        .total_tax
+        .map(|t| format!("{t:.2}"))
+        .unwrap_or("—".into());
     let accounts = distinct_line_values(bt.line_items.as_deref(), |li| li.account_code.as_deref());
     let tax_types = distinct_line_values(bt.line_items.as_deref(), |li| li.tax_type.as_deref());
     // The id is what set_bank_transaction_tax_type takes; without it here, a caller
@@ -1339,7 +1346,10 @@ pub fn format_statement_line(line: &StatementLine) -> String {
         .as_deref()
         .or(line.posted_date.as_deref())
         .unwrap_or("—");
-    let amount = line.amount.map(|a| format!("{a:.2}")).unwrap_or_else(|| "—".into());
+    let amount = line
+        .amount
+        .map(|a| format!("{a:.2}"))
+        .unwrap_or_else(|| "—".into());
     let payee = line.payee.as_deref().unwrap_or("—");
     let reference = line.reference.as_deref().unwrap_or("");
     let notes = line.notes.as_deref().unwrap_or("");
@@ -1496,14 +1506,18 @@ pub fn format_cash_validation(items: &[CashValidationItem]) -> String {
             .map(|b| {
                 format!(
                     "{} {}",
-                    b.value.map(|v| format!("{v:.2}")).unwrap_or_else(|| "—".into()),
+                    b.value
+                        .map(|v| format!("{v:.2}"))
+                        .unwrap_or_else(|| "—".into()),
                     b.debit_or_credit.as_deref().unwrap_or("")
                 )
             })
             .unwrap_or_else(|| "—".into());
 
         out.push(String::new());
-        out.push(format!("Account {id} | statement_balance_date:{bal_date} | bal:{bal}"));
+        out.push(format!(
+            "Account {id} | statement_balance_date:{bal_date} | bal:{bal}"
+        ));
 
         if let Some(ref cur) = item
             .bank_statement

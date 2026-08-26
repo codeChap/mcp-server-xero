@@ -21,7 +21,9 @@ pub struct ListInvoicesParams {
     #[schemars(description = "Search term (searches invoice number, reference, contact name)")]
     pub search: Option<String>,
 
-    #[schemars(description = "Custom where filter (Xero OData syntax, e.g. 'DueDate>=DateTime(2024,01,01)')")]
+    #[schemars(
+        description = "Custom where filter (Xero OData syntax, e.g. 'DueDate>=DateTime(2024,01,01)')"
+    )]
     pub where_filter: Option<String>,
 
     #[schemars(description = "Order results, e.g. 'Date DESC' or 'DueDate ASC'")]
@@ -77,7 +79,9 @@ pub struct UpdateInvoiceParams {
     #[schemars(description = "New reference string")]
     pub reference: Option<String>,
 
-    #[schemars(description = "Updated line items as JSON array (replaces all existing line items)")]
+    #[schemars(
+        description = "Updated line items as JSON array (replaces all existing line items)"
+    )]
     pub line_items: Option<String>,
 }
 
@@ -205,7 +209,9 @@ pub struct UpdateContactParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ListAccountsParams {
-    #[schemars(description = "Custom where filter (e.g. 'Type==\"REVENUE\"' or 'Status==\"ACTIVE\"')")]
+    #[schemars(
+        description = "Custom where filter (e.g. 'Type==\"REVENUE\"' or 'Status==\"ACTIVE\"')"
+    )]
     pub where_filter: Option<String>,
 }
 
@@ -370,10 +376,8 @@ pub struct SetBankTransactionTaxTypeParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ListBankStatementLinesParams {
-    #[schemars(
-        description = "Bank account AccountID (UUID). Use list_accounts with \
-                       where_filter Type==\"BANK\" to find it."
-    )]
+    #[schemars(description = "Bank account AccountID (UUID). Use list_accounts with \
+                       where_filter Type==\"BANK\" to find it.")]
     pub bank_account_id: String,
 
     #[schemars(description = "Start date YYYY-MM-DD (inclusive). Range max 12 months.")]
@@ -397,9 +401,7 @@ pub struct ListBankStatementLinesParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct GetCashValidationParams {
-    #[schemars(
-        description = "Optional balance date YYYY-MM-DD. Defaults to today per Xero."
-    )]
+    #[schemars(description = "Optional balance date YYYY-MM-DD. Defaults to today per Xero.")]
     pub balance_date: Option<String>,
 }
 

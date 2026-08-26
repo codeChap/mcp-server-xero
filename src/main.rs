@@ -5,7 +5,7 @@ mod params;
 mod server;
 
 use anyhow::Result;
-use rmcp::{ServiceExt, transport::stdio};
+use rmcp::{transport::stdio, ServiceExt};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
